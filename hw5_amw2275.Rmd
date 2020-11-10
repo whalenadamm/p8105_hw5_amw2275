@@ -31,7 +31,7 @@ Read in the data.
 
 ```{r}
 homicide_df = 
-  read_csv("./data/homicide-data.csv") %>% 
+  read_csv("./data/homicide_data/homicide-data.csv") %>% 
   mutate(
     city_state = str_c(city, state, sep = "_"),
     resolved = case_when(
@@ -105,4 +105,26 @@ homicide_df =
   filter(city_state != "Tulsa_AL") %>% 
   nest(data = resolved)
 ```
+
+## Problem 2
+
+import one dataset
+
+```{r}
+data_1 = read_csv("data/long_data/con_01.csv")
+```
+
+```{r}
+path_df = 
+  tibble(
+    path = list.files("data/long_data")
+  ) %>% 
+  mutate(path = str_c("data/long_data/", path))
+
+read_csv(path_df$path[[1]])
+```
+
+
+
+
 
