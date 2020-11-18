@@ -46,7 +46,7 @@ homicide_df =
 
 Let's look at this a bit.
 
-```{r}
+```{r, message = FALSE}
 aggregate_df = 
   homicide_df %>% 
   group_by(city_state) %>% 
@@ -106,15 +106,17 @@ homicide_df =
   nest(data = resolved)
 ```
 
-## Problem 2
+## Problem 2: Longitudinal Data Set
 
-import one dataset
+Import one dataset first.
 
-```{r}
+```{r, path_1}
 data_1 = read_csv("data/long_data/con_01.csv")
 ```
 
-```{r}
+Cool, now let's make a data frame of the paths.
+
+```{r, path_df}
 path_df = 
   tibble(
     path = list.files("data/long_data")
@@ -124,7 +126,75 @@ path_df =
 read_csv(path_df$path[[1]])
 ```
 
+Ok, let's try this as a `for` loop.
 
+```{r message = FALSE, path_for}
+output_df = vector("list", length = 20)
 
+for (i in 1:20) {
+  
+  output_df[[i]] = read_csv(path_df$path[[i]])
+  
+}
 
+output_df %>% bind_rows()
+```
+
+Good, but maybe a map will be easier.
+
+```{r message = FALSE, path_map}
+output_df = map_df(path_df$path, read_csv) %>% bind_rows()
+```
+
+It was! Ok, now to put it all into the `path_df` data frame and tidy.
+
+```{r message = FALSE, path_tidy}
+path_tidy = 
+  path_df %>% 
+  mutate(
+    data = map(.x = path, ~read_csv(.x)),
+    arm = 
+      case_when(
+        str_detect(path, "con") == TRUE ~ "control",
+        str_detect(path, "exp") == TRUE ~ "experimental"
+      ),
+    id = str_sub(path, -6, -5),
+    id = as.factor(id)
+  ) %>% 
+  select(id, arm, data) %>% 
+  unnest(data) %>% 
+  pivot_longer(
+    week_1:week_8,
+    names_to = "week",
+    names_prefix = "week_",
+    values_to = "value"
+  ) %>% 
+  mutate(
+    week = as.numeric(week),
+    value = as.numeric(value)
+  )
+
+path_tidy
+```
+
+Sweet! Now let's make a spaghetti plot.
+
+```{r, spagett}
+spagett_plot = 
+  path_tidy %>% 
+  group_by(arm, id) %>% 
+  ggplot(aes(x = week, y = value, group = id, color = id)) +
+  geom_line() +
+  geom_point(alpha = 0.5) +
+  facet_grid(arm ~ .) +
+  labs(
+    title = "Observed Values for Control vs. Experimental Arms over Time",
+    x = "Values",
+    y = "Week of Observation"
+  )
+
+spagett_plot
+```
+
+Based on our spaghetti plot, it appears that generally, the experimental group had an increase in values over time, whereas the control group had a slight decrease in values over the course of observation. There was substantial variation within each group for any given week, from spreads of roughly 2.5 to 5 units.
 
