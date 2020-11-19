@@ -7,6 +7,7 @@ output: github_document
 ```{r setup, include=FALSE}
 library(tidyverse)
 library(rvest)
+library(patchwork)
 
 knitr::opts_chunk$set(
   fig.width = 6,
@@ -128,7 +129,7 @@ read_csv(path_df$path[[1]])
 
 Ok, let's try this as a `for` loop.
 
-```{r message = FALSE, path_for}
+```{r path_for, message = FALSE}
 output_df = vector("list", length = 20)
 
 for (i in 1:20) {
@@ -142,13 +143,13 @@ output_df %>% bind_rows()
 
 Good, but maybe a map will be easier.
 
-```{r message = FALSE, path_map}
+```{r path_map, message = FALSE}
 output_df = map_df(path_df$path, read_csv) %>% bind_rows()
 ```
 
 It was! Ok, now to put it all into the `path_df` data frame and tidy.
 
-```{r message = FALSE, path_tidy}
+```{r path_tidy, message = FALSE}
 path_tidy = 
   path_df %>% 
   mutate(
@@ -179,7 +180,7 @@ path_tidy
 
 Sweet! Now let's make a spaghetti plot.
 
-```{r, spagett}
+```{r spagett}
 spagett_plot = 
   path_tidy %>% 
   group_by(arm, id) %>% 
@@ -203,7 +204,7 @@ Based on our spaghetti plot, it appears that generally, the experimental group h
 To begin, we will set a random sample that has 5000 datasets taken from a normal distribution with a mean of 0, sample size of 30, and standard deviation of 5. 
 
 
-```{r, sim_1}
+```{r, set_fxn}
 power_sim = function(mu, samp_size = 30, sigma = 5) {
   
   if (!is.numeric(mu)) {
@@ -212,7 +213,7 @@ power_sim = function(mu, samp_size = 30, sigma = 5) {
   
   sim_data = 
     tibble(
-      x = rnorm(n = samp_size, mean = mu, sd = sigma)
+      x = rnorm(mean = mu, n = samp_size, sd = sigma)
     )
   
   result = 
@@ -235,12 +236,12 @@ power_sim = function(mu, samp_size = 30, sigma = 5) {
 power_sim(0)
 ```
 
-Rad, I built a function. Now, to loop it, and store it all in the same data frame.
+Rad, I built a function. Now, to loop it for µ = 0. Note: I will be leaving this preliminary loop at 50 runs to preserve computing power.
 
-```{r eval = FALSE}
-output = vector("list", length = 5000)
+```{r loop_1}
+output = vector("list", length = 50)
 
-for (i in 1:5000) {
+for (i in 1:50) {
   
   output[[i]] = power_sim(mu = 0)
   
@@ -249,6 +250,109 @@ for (i in 1:5000) {
 bind_rows(output)
 ```
 
+Cool. Repeat for µ = [1, 2, 3, 4, 5, 6] as well. Note: I will be leaving this preliminary loop at 50 runs to preserve computing power.
 
+```{r list_loop}
+mu_list = 
+  tibble(
+    "mu = 0" = 0,
+    "mu = 1" = 1,
+    "mu = 2" = 2,
+    "mu = 3" = 3,
+    "mu = 4" = 4,
+    "mu = 5" = 5,
+    "mu = 6" = 6
+  )
+
+output = vector("list", length = 7)
+
+for (i in 1:7) {
+  
+  output[[i]] = 
+    rerun(50, power_sim(mu = mu_list[[i]])) %>% 
+    bind_rows()
+  
+}
+
+output
+```
+
+Great. Now let's put all of it into one data frame, with 5000 runs for each µ.
+
+```{r df_mapping}
+sim_df = 
+  tibble(
+    mu = c(0, 1, 2, 3, 4, 5, 6)
+  ) %>% 
+  mutate(
+    output_lists = map(.x = mu, ~ rerun(5000, power_sim(mu = .x))),
+    power_df = map(output_lists, bind_rows)
+  ) %>% 
+  select(-output_lists) %>% 
+  unnest(power_df)
+
+sim_df
+```
+
+Lit. Now let's manipulate the data to calculate power, and prepare it for graphing.
+
+```{r power_plot, warning = FALSE}
+power_plot = 
+  sim_df %>% 
+  group_by(mu) %>% 
+  count(reject_null = p_value < 0.05) %>% 
+  mutate(
+    power = n/sum(n)
+  ) %>% 
+  filter(reject_null == TRUE) %>% 
+  ggplot(aes(x = mu, y = power)) +
+  geom_point() +
+  geom_smooth() +
+  labs(
+    title = "Simulated Power on True Effect Size",
+    x = "True µ of Simulated Sample",
+    y = "Estimated Power"
+  ) + 
+  xlim(0, 6)
+
+power_plot
+```
+
+Our plot of the estimated power for our test (proportion of the time we reject the null hypothesis when it is false) shows a sigmoid curve, that starts close to 0 for a true µ of 1, but increases exponentially as the effect size increases. We would expect this, as our ability to correctly reject the null (µ = 0) increases as the true µ moves away from 0. 
+
+```{r patch_plot, message = FALSE, warning = FALSE}
+mu_hat_plot = 
+  sim_df %>% 
+  group_by(mu) %>% 
+  summarize(avg_mu_hat = mean(mu_hat)) %>% 
+  ggplot(aes(x = mu, y = avg_mu_hat)) +
+  geom_point() +
+  geom_smooth() +
+  labs(
+    x = "True µ of Simulated Sample",
+    y = "Average Estimate for µ"
+  ) 
+
+muhat_reject_plot = 
+  sim_df %>% 
+  filter(p_value < 0.05) %>% 
+  group_by(mu) %>% 
+  summarize(avg_mu_hat = mean(mu_hat)) %>% 
+  ggplot(aes(x = mu, y = avg_mu_hat)) +
+  geom_point() +
+  geom_smooth() +
+  labs(
+    x = "True µ of Simulated Sample",
+    y = "Average Estimate for µ when p < 0.05"
+  ) 
+
+mu_hat_plot + muhat_reject_plot +
+  plot_annotation(
+    title = "Estimated µ on True µ",
+    subtitle = "Comparing overall simulation to those when the null hypothesis was rejected"
+  )
+```
+
+From our overlay plots of estimated µ compared to the true µ, when all simulations are included versus when only those which resulted in a rejection of the null hypothesis, we can see that the full plot appears to be linear, whereas the plot with only rejections included shows an average estimated µ that is higher for lower true µ values. We would also expect this, as the average rejected µ estimate needs to be significantly different from the null value of 0 to be rejected, and the further away it is, the more likely it is to be rejected at the 5% level of significance. Therefore, the estimated µs will be higher at lower true µ samples.
 
 
